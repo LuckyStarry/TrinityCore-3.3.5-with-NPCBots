@@ -12,9 +12,9 @@ RUN  make
 FROM alpine:3.17.0 AS APPLICATION
 COPY --from=BUILDING /app/build/src/server/authserver/authserver /usr/bin/authserver
 COPY --from=BUILDING /app/build/src/server/worldserver/worldserver /usr/bin/worldserver
-COPY --from=BUILDING /app/build/src/tools/map_extractor/map_extractor /usr/bin/map_extractor
+COPY --from=BUILDING /app/build/src/tools/map_extractor/mapextractor /usr/bin/mapextractor
 COPY --from=BUILDING /app/build/src/tools/mmaps_generator/mmaps_generator /usr/bin/mmaps_generator
-COPY --from=BUILDING /app/build/src/tools/vmap4_assembler/vmap4_assembler /usr/bin/vmap4_assembler
-COPY --from=BUILDING /app/build/src/tools/vmap4_extractor/vmap4_extractor /usr/bin/vmap4_extractor
+COPY --from=BUILDING /app/build/src/tools/vmap4_assembler/vmap4assembler /usr/bin/vmap4assembler
+COPY --from=BUILDING /app/build/src/tools/vmap4_extractor/vmap4extractor /usr/bin/vmap4extractor
 
 ENTRYPOINT [ "echo",  "Check the README.md file for instructions"]
