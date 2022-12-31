@@ -4,7 +4,8 @@ RUN  apt-get install git clang cmake make gcc g++ libmysqlclient-dev libssl-dev 
 RUN  update-alternatives --install /usr/bin/cc cc /usr/bin/clang 100
 RUN  update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang 100
 COPY . /app
-RUN  mkdir build && cd build
+RUN  mkdir build
+WORKDIR /app/build
 RUN  cmake ../
 RUN  make
 
