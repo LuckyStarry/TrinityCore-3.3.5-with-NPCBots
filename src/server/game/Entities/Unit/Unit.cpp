@@ -4249,7 +4249,8 @@ void Unit::RemoveMovementImpairingAuras(bool withRoot)
 
 void Unit::RemoveAurasWithMechanic(uint32 mechanicMaskToRemove, AuraRemoveMode removeMode, uint32 exceptSpellId, bool withEffectMechanics)
 {
-    RemoveAppliedAuras([=](AuraApplication const* aurApp)
+    std::vector<Aura*> aurasToUpdateTargets;
+    RemoveAppliedAuras([=, &aurasToUpdateTargets](AuraApplication const* aurApp)
     {
         Aura* aura = aurApp->GetBase();
         if (exceptSpellId && aura->GetId() == exceptSpellId)
@@ -4264,9 +4265,18 @@ void Unit::RemoveAurasWithMechanic(uint32 mechanicMaskToRemove, AuraRemoveMode r
             return true;
 
         // effect mechanic matches required mask for removal - don't remove, only update targets
-        aura->UpdateTargetMap(aura->GetCaster());
+        aurasToUpdateTargets.push_back(aura);
         return false;
     }, removeMode);
+
+    for (Aura* aura : aurasToUpdateTargets)
+    {
+        aura->UpdateTargetMap(aura->GetCaster());
+
+        // Fully remove the aura if all effects were removed
+        if (!aura->IsPassive() && aura->GetOwner() == this && !aura->GetApplicationOfTarget(GetGUID()))
+            aura->Remove(removeMode);
+    }
 }
 
 void Unit::RemoveAurasByShapeShift()
@@ -11605,6 +11615,14 @@ bool Unit::InitTamedPet(Pet* pet, uint8 level, uint32 spell_id)
         {
             if (Player* killed = victim->ToPlayer())
                 sScriptMgr->OnPlayerKilledByCreature(killerCre, killed);
+            //npcbot: Creature Kill hook for owner
+            else if (Creature* killedCre = victim->ToCreature())
+            {
+                Unit* killerCreOwner = killerCre->GetCreator();
+                if (killerCre->IsNPCBotOrPet() && killerCreOwner && killerCreOwner->GetTypeId() == TYPEID_PLAYER)
+                    sScriptMgr->OnCreatureKill(killerCreOwner->ToPlayer(), killedCre);
+            }
+            //end npcbot
         }
     }
 }
@@ -12694,6 +12712,10 @@ float Unit::GetCombatRatingReduction(CombatRating cr) const
 {
     if (Player const* player = ToPlayer())
         return player->GetRatingBonusValue(cr);
+    //npcbot: get bot resilience
+    else if (GetTypeId() == TYPEID_UNIT && ToCreature()->IsNPCBotOrPet())
+        return BotMgr::GetBotResilience(ToCreature());
+    //end npcbot
     // Player's pet get resilience from owner
     else if (IsPet() && GetOwner())
         if (Player* owner = GetOwner()->ToPlayer())
