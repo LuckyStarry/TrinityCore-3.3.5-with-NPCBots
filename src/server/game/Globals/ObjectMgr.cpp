@@ -57,6 +57,10 @@
 #include "Vehicle.h"
 #include "World.h"
 
+//npcbot
+#include "botdatamgr.h"
+//end npcbot
+
 ScriptMapMap sSpellScripts;
 ScriptMapMap sEventScripts;
 ScriptMapMap sWaypointScripts;
@@ -1216,7 +1220,7 @@ void ObjectMgr::CheckCreatureTemplate(CreatureTemplate const* cInfo)
     }
 
     //npcbot: skip flags check and damage multiplier
-    if (cInfo->flags_extra & (CREATURE_FLAG_EXTRA_NPCBOT | CREATURE_FLAG_EXTRA_NPCBOT_PET))
+    if (cInfo->IsNPCBotOrPet())
         return;
     //end npcbot
 
@@ -10363,6 +10367,18 @@ GameObjectOverride const* ObjectMgr::GetGameObjectOverride(ObjectGuid::LowType s
 
 CreatureTemplate const* ObjectMgr::GetCreatureTemplate(uint32 entry) const
 {
+    //npcbot: try fetch custom creature template
+    if (entry >= BOT_ENTRY_CREATE_BEGIN)
+    {
+        if (CreatureTemplate const* extra_template = BotDataMgr::GetBotExtraCreatureTemplate(entry))
+        {
+            //custom creature template should only exist in custom container
+            ASSERT_NODEBUGINFO(_creatureTemplateStore.find(entry) == _creatureTemplateStore.end());
+            return extra_template;
+        }
+    }
+    //end npcbot
+
     return Trinity::Containers::MapGetValuePtr(_creatureTemplateStore, entry);
 }
 

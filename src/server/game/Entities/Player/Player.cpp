@@ -406,7 +406,7 @@ Player::Player(WorldSession* session): Unit(true)
     m_groupUpdateTimer.Reset(5000);
 
     /////////////// NPCBot System //////////////////
-    _botMgr = nullptr;
+    _botMgr = new BotMgr(this);
     ///////////// End NPCBot System ////////////////
 }
 
@@ -445,11 +445,7 @@ Player::~Player()
     delete _cinematicMgr;
 
     //npcbot
-    if (_botMgr)
-    {
-        delete _botMgr;
-        _botMgr = nullptr;
-    }
+    delete _botMgr;
     //end npcbot
 
     sWorld->DecreasePlayerCount();
@@ -732,7 +728,7 @@ void Player::SendMirrorTimer(MirrorTimerType Type, uint32 MaxValue, uint32 Curre
         return;
     }
 
-    SendDirectMessage(WorldPackets::Misc::StartMirrorTimer(Type, CurrentValue, MaxValue, Regen, 0, 0).Write());
+    SendDirectMessage(WorldPackets::Misc::StartMirrorTimer(Type, CurrentValue, MaxValue, Regen, false, 0).Write());
 }
 
 void Player::StopMirrorTimer(MirrorTimerType Type)
@@ -1363,9 +1359,9 @@ void Player::Update(uint32 p_time)
     //because we don't want player's ghost teleported from graveyard
     if (IsHasDelayedTeleport() && IsAlive())
         TeleportTo(m_teleport_dest, m_teleport_options);
+
     //NpcBot mod: Update
-    if (_botMgr)
-        _botMgr->Update(p_time);
+    _botMgr->Update(p_time);
     //end Npcbot
 }
 
@@ -2020,19 +2016,19 @@ bool Player::IsImmunedToSpellEffect(SpellInfo const* spellInfo, SpellEffectInfo 
 //NPCBOT
 bool Player::HaveBot() const
 {
-    return _botMgr && _botMgr->HaveBot();
+    return _botMgr->HaveBot();
 }
 uint8 Player::GetNpcBotsCount() const
 {
-    return _botMgr ? _botMgr->GetNpcBotsCount() : 0;
+    return _botMgr->GetNpcBotsCount();
 }
 void Player::RemoveAllBots(uint8 removetype)
 {
-    if (_botMgr) _botMgr->RemoveAllBots(removetype);
+    _botMgr->RemoveAllBots(removetype);
 }
 void Player::UpdatePhaseForBots()
 {
-    if (_botMgr) _botMgr->UpdatePhaseForBots();
+    _botMgr->UpdatePhaseForBots();
 }
 //END NPCBOT
 
@@ -2467,8 +2463,7 @@ void Player::SetGameMaster(bool on)
     }
 
     //npcbot: pet is handled already, bots are not, so do it
-    if (HaveBot())
-        _botMgr->OnOwnerSetGameMaster(on);
+    _botMgr->OnOwnerSetGameMaster(on);
     //end npcbot
 
     UpdateObjectVisibility();
@@ -2780,8 +2775,7 @@ void Player::GiveLevel(uint8 level)
     sScriptMgr->OnPlayerLevelChanged(this, oldLevel);
 
     //npcbot: force bots to update stats
-    if (HaveBot())
-        _botMgr->SetBotsShouldUpdateStats();
+    _botMgr->SetBotsShouldUpdateStats();
     //end npcbot
 }
 
@@ -6938,20 +6932,17 @@ bool Player::RewardHonor(Unit* victim, uint32 groupsize, int32 honor, bool pvpto
             UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_SPECIAL_PVP_KILL, 1, 0, victim);
         }
         //npcbot: honor for bots
-        else if (victim->ToCreature()->IsNPCBot() && !victim->ToCreature()->IsTempBot())
+        else if (victim->IsNPCBot() && !victim->ToCreature()->IsTempBot())
         {
+            static const float WANDERING_BOT_HONOR_GAIN_MULT = 10.0f;
+
+            if (!BotMgr::IsBotHKEnabled())
+                return false;
+
             Creature const* bot = victim->ToCreature();
 
-            uint32 check1 = GetFaction();
-            uint32 check2 = bot->GetFaction();
-
-            if (!bot->IsFreeBot())
-            {
-                check1 = GetTeam();
-                check2 = bot->GetBotOwner()->GetTeam();
-            }
-
-            if (check1 == check2 && !sWorld->IsFFAPvPRealm())
+            uint32 victimTeam = !bot->IsFreeBot() ? bot->GetBotOwner()->GetTeam() : BotDataMgr::GetTeamForFaction(bot->GetFaction());
+            if (GetTeam() == victimTeam && !sWorld->IsFFAPvPRealm())
                 return false;
 
             uint8 k_level = GetLevel();
@@ -6961,10 +6952,26 @@ bool Player::RewardHonor(Unit* victim, uint32 groupsize, int32 honor, bool pvpto
             if (v_level <= k_grey)
                 return false;
 
-            victim_guid.Clear(); // Don't show HK: <rank> message, only log.
+            if (!BotMgr::IsBotHKMessageEnabled())
+                victim_guid.Clear(); // Don't show HK: <rank> message, only log.
 
             //TODO: honor gain rate
             honor_f = ceil(Trinity::Honor::hk_honor_at_level_f(k_level) * (v_level - k_grey) / (k_level - k_grey));
+            honor_f *= BotMgr::GetBotHKHonorRate();
+            if (bot->IsWandererBot() && !bot->GetBotBG())
+                honor_f *= WANDERING_BOT_HONOR_GAIN_MULT;
+
+            if (BotMgr::IsBotHKAchievementsEnabled())
+            {
+                ApplyModUInt32Value(PLAYER_FIELD_KILLS, 1, true);
+                ApplyModUInt32Value(PLAYER_FIELD_LIFETIME_HONORABLE_KILLS, 1, true);
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_EARN_HONORABLE_KILL);
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_HK_CLASS, BotMgr::GetBotPlayerClass(victim->ToCreature()));
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_HK_RACE, BotMgr::GetBotPlayerRace(victim->ToCreature()));
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_HONORABLE_KILL_AT_AREA, GetAreaId());
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_HONORABLE_KILL, 1, 0, victim);
+                UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_SPECIAL_PVP_KILL, 1, 0, victim);
+            }
         }
         //end npcbot
         else
@@ -7778,8 +7785,10 @@ void Player::_ApplyWeaponDamage(uint8 slot, ItemTemplate const* proto, bool appl
             if (extraDPS)
             {
                 float average = extraDPS * proto->Delay / 1000.0f;
-                minDamage = 0.7f * average;
-                maxDamage = 1.3f * average;
+                float mod = ssv->isTwoHand(proto->ScalingStatValue) ? 0.2f : 0.3f;
+
+                minDamage = (1.0f - mod) * average;
+                maxDamage = (1.0f + mod) * average;
             }
         }
 
@@ -8590,6 +8599,14 @@ void Player::SendLoot(ObjectGuid guid, LootType loot_type)
             if (go->GetLootMode() > 0)
                 if (GameObjectTemplateAddon const* addon = go->GetTemplateAddon())
                     loot->generateMoneyLoot(addon->Mingold, addon->Maxgold);
+
+            //npcbot: fill wandering bot kill reward
+            if (lootid)
+            {
+                if (go->GetEntry() == GO_BOT_MONEY_BAG)
+                    BotMgr::OnBotWandererKilled(go);
+            }
+            //end npcbot
 
             if (loot_type == LOOT_FISHING)
                 go->getFishLoot(loot, this);
@@ -19744,6 +19761,10 @@ void Player::SaveToDB(CharacterDatabaseTransaction trans, bool create /* = false
     // save pet (hunter pet level and experience and all type pets health/mana).
     if (Pet* pet = GetPet())
         pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+
+    //npcbot: save stored items
+    BotDataMgr::SaveNpcBotStoredGear(GetGUID(), trans);
+    //end npcbot
 }
 
 // fast save function for item/money cheating preventing - save only inventory and money state
@@ -22164,8 +22185,7 @@ void Player::UpdatePvP(bool state, bool _override)
     }
 
     //npcbot: update pvp flags for bots
-    if (HaveBot())
-        _botMgr->UpdatePvPForBots();
+    _botMgr->UpdatePvPForBots();
     //end npcbot
 }
 
@@ -22514,9 +22534,9 @@ bool Player::HaveAtClient(Object const* u) const
     return u == this || m_clientGUIDs.find(u->GetGUID()) != m_clientGUIDs.end();
 }
 
-bool Player::IsNeverVisible() const
+bool Player::IsNeverVisible(bool allowServersideObjects) const
 {
-    if (Unit::IsNeverVisible())
+    if (Unit::IsNeverVisible(allowServersideObjects))
         return true;
 
     if (GetSession()->PlayerLogout() || GetSession()->PlayerLoading())
@@ -22985,7 +23005,6 @@ void Player::SendInitialPacketsAfterAddToMap()
         SendDirectMessage(&setCompoundState);
     }
 
-    SendAurasForTarget(this);
     SendEnchantmentDurations();                             // must be after add to map
     SendItemDurations();                                    // must be after add to map
     SendQuestGiverStatusMultiple();
@@ -23379,9 +23398,9 @@ void Player::LearnSkillRewardedSpells(uint32 skillId, uint32 skillValue)
     }
 }
 
-void Player::SendAurasForTarget(Unit* target) const
+void Player::SendAurasForTarget(Unit* target, bool force /*= false*/) const
 {
-    if (!target || target->GetVisibleAuras().empty())                  // speedup things
+    if (!target || (!force && target->GetVisibleAuras().empty()))                  // speedup things
         return;
 
     WorldPacket data(SMSG_AURA_UPDATE_ALL);
@@ -24450,11 +24469,12 @@ void Player::SetBattlegroundOrBattlefieldRaid(Group* group, int8 subgroup)
         BotMap const* map = GetBotMgr()->GetBotMap();
         for (BotMap::const_iterator itr = map->begin(); itr != map->end(); ++itr)
         {
-            Creature const* bot = itr->second;
+            Creature* bot = itr->second;
             if (!bot || !GetGroup()->IsMember(bot->GetGUID()))
                 continue;
 
-            ASSERT(group->AddMember((Player*)bot));
+            if (!group->IsMember(itr->first))
+                group->AddMember(bot);
         }
     }
     //end npcbot

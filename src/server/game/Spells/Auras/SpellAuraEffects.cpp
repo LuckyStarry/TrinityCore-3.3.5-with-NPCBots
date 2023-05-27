@@ -1844,7 +1844,7 @@ void AuraEffect::HandleAuraModShapeshift(AuraApplication const* aurApp, uint8 mo
             case FORM_BERSERKERSTANCE:
             {
                 //npcbot: skip this, handled inside class ai
-                if (target->GetTypeId() == TYPEID_UNIT && target->ToCreature()->IsNPCBot())
+                if (target->IsNPCBot())
                     break;
                 //end npcbot
                 uint32 Rage_val = 0;
@@ -3174,6 +3174,17 @@ void AuraEffect::HandleAuraModEffectImmunity(AuraApplication const* aurApp, uint
         else
             sOutdoorPvPMgr->HandleDropFlag(player, GetSpellInfo()->Id);
     }
+
+    //npcbot
+    if (Creature* bot = target->ToCreature())
+    {
+        if (!apply && bot->IsNPCBot() && (GetSpellInfo()->AuraInterruptFlags & AURA_INTERRUPT_FLAG_IMMUNE_OR_LOST_SELECTION))
+        {
+            if (Battleground* botbg = bot->GetBotBG())
+                botbg->EventBotDroppedFlag(bot);
+        }
+    }
+    //end npcbot
 }
 
 void AuraEffect::HandleAuraModStateImmunity(AuraApplication const* aurApp, uint8 mode, bool apply) const

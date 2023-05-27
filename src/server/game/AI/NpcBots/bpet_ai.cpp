@@ -17,6 +17,7 @@ static constexpr uint32 DRUID_MAX_PET_POSITIONS = 3;
 static constexpr uint32 DK_MAX_PET_POSITIONS = 10;
 static constexpr uint32 DARK_RANGER_MAX_PET_POSITIONS = 5;
 static constexpr uint32 NECROMANCER_MAX_PET_POSITIONS = 6;
+static constexpr uint32 CRYPT_LORD_MAX_PET_POSITIONS = 6;
 float constexpr ShamanPetPositionAnglesByPosNumber[SHAMAN_MAX_PET_POSITIONS] =
 {
     0.f,//left
@@ -58,6 +59,15 @@ float constexpr NecromancerPetPositionAnglesByPosNumber[NECROMANCER_MAX_PET_POSI
     1.2566370f,//2*M_PI/5
     1.8849555f //3*M_PI/5
 };
+float constexpr CryptLordPetPositionAnglesByPosNumber[CRYPT_LORD_MAX_PET_POSITIONS] =
+{
+    0.7853981f,//1*M_PI/4
+    2.3561944f,//3*M_PI/4
+    0.0f,
+    float(M_PI),
+    5.4977875f,//7*M_PI/4
+    3.9269910f //5*M_PI/4
+};
 
 extern uint8 GroupIconsFlags[TARGETICONCOUNT];
 
@@ -71,12 +81,16 @@ bot_pet_ai::bot_pet_ai(Creature* creature) : CreatureAI(creature)
     m_botCommandState = BOT_COMMAND_FOLLOW;
     regenTimer = 0;
     waitTimer = 0;
+    indoorsTimer = 0;
+    outdoorsTimer = 0;
     GC_Timer = 0;
     lastdiff = 0;
     _energyFraction = 0.f;
     _updateTimerMedium = 0;
     _updateTimerEx1 = urand(12000, 15000);
     checkAurasTimer = 0;
+
+    _wanderer = false;
 
     myType = 0;
     petOwner = nullptr;
@@ -109,6 +123,15 @@ bool bot_pet_ai::_checkImmunities(Unit const* target, SpellInfo const* spellInfo
 //Follow point calculation
 void bot_pet_ai::_calculatePos(Position& pos) const
 {
+    switch (myType)
+    {
+        case BOT_PET_LOCUST_SWARM:
+            pos.Relocate(me);
+            return;
+        default:
+            break;
+    }
+
     float x,y,z;
     //destination
     if (!petOwner->GetMotionMaster()->GetDestination(x, y, z) || petOwner->GetTransport())
@@ -126,11 +149,13 @@ void bot_pet_ai::_calculatePos(Position& pos) const
         o += DarkRangerPetPositionAnglesByPosNumber[posNum];
     else if (petOwner->GetBotClass() == BOT_CLASS_NECROMANCER)
         o += NecromancerPetPositionAnglesByPosNumber[posNum];
+    else if (petOwner->GetBotClass() == BOT_CLASS_CRYPT_LORD)
+        o += CryptLordPetPositionAnglesByPosNumber[posNum];
 
     o = Position::NormalizeOrientation(o);
     //distance
-    x += (PET_FOLLOW_DIST + me->GetCombatReach()) * std::cos(o);
-    y += (PET_FOLLOW_DIST + me->GetCombatReach()) * std::sin(o);
+    x += (PET_FOLLOW_DIST + me->GetCombatReach() + petOwner->GetCombatReach()) * std::cos(o);
+    y += (PET_FOLLOW_DIST + me->GetCombatReach() + petOwner->GetCombatReach()) * std::sin(o);
     if (!petOwner->GetTransport())
         me->UpdateGroundPositionZ(x, y, z);
     if (me->GetPositionZ() < z)
@@ -147,6 +172,14 @@ void bot_pet_ai::SetBotCommandState(uint8 st, bool force, Position* newpos)
 
     if (JumpingOrFalling())
         return;
+
+    switch (myType)
+    {
+        case BOT_PET_LOCUST_SWARM:
+            return;
+        default:
+            break;
+    }
 
     if ((st & BOT_COMMAND_FOLLOW) && !IsChanneling() &&
         ((!me->isMoving() && !IsCasting() && petOwner->GetBotOwner()->IsAlive()) || force))
@@ -376,6 +409,14 @@ uint32 bot_pet_ai::GetData(uint32 data) const
             return 0;
         case BOTPETAI_MISC_MAXLEVEL:
             return petOwner->GetLevel();
+        case BOTPETAI_MISC_FIXEDLEVEL:
+            return 0;
+        case BOTPETAI_MISC_CARRY:
+            return 0;
+        case BOTPETAI_MISC_CAPACITY:
+            return 0;
+        case BOTPETAI_MISC_MAX_ATTACKERS:
+            return 0;
         default:
             TC_LOG_DEBUG("entities.unit", "bot_pet_ai::GetData(): unk data type %u!", data);
             return 0;
@@ -455,6 +496,11 @@ void bot_pet_ai::SetPetStats(bool force)
         case BOT_PET_NECROSKELETON:
         //sea witch
         case BOT_PET_TORNADO:
+        //crypt lord
+        case BOT_PET_CARRION_BEETLE1:
+        case BOT_PET_CARRION_BEETLE2:
+        case BOT_PET_CARRION_BEETLE3:
+        case BOT_PET_LOCUST_SWARM:
             break;
         default:
             TC_LOG_ERROR("entities.player", "bot_pet_ai::SetPetStats(): unk pet type %u, aborting", myType);
@@ -472,6 +518,10 @@ void bot_pet_ai::SetPetStats(bool force)
         case BOT_PET_DARK_MINION_ELITE:
         case BOT_PET_NECROSKELETON:
         case BOT_PET_TORNADO:
+        case BOT_PET_CARRION_BEETLE1:
+        case BOT_PET_CARRION_BEETLE2:
+        case BOT_PET_CARRION_BEETLE3:
+        case BOT_PET_LOCUST_SWARM:
             if (force == false)
                 return;
             break;
@@ -479,7 +529,8 @@ void bot_pet_ai::SetPetStats(bool force)
             break;
     }
 
-    uint8 level = std::min<uint8>(petOwner->GetLevel(), GetData(BOTPETAI_MISC_MAXLEVEL));
+    uint8 level = GetData(BOTPETAI_MISC_FIXEDLEVEL);
+    level = level ? level : std::min<uint8>(petOwner->GetLevel(), GetData(BOTPETAI_MISC_MAXLEVEL));
     if (level != me->GetLevel())
     {
         me->SetLevel(level);
@@ -590,6 +641,21 @@ void bot_pet_ai::SetPetStats(bool force)
                 //custom pets / not using mana
                 me->SetByteValue(UNIT_FIELD_BYTES_0, 3, MAX_POWERS);
             }
+            else if (myType == BOT_PET_CARRION_BEETLE1)
+            {
+                me->SetCreateHealth(pInfo->health / 4);
+                me->SetByteValue(UNIT_FIELD_BYTES_0, 3, MAX_POWERS);
+            }
+            else if (myType == BOT_PET_CARRION_BEETLE2)
+            {
+                me->SetCreateHealth(pInfo->health / 4);
+                me->SetByteValue(UNIT_FIELD_BYTES_0, 3, MAX_POWERS);
+            }
+            else if (myType == BOT_PET_CARRION_BEETLE3)
+            {
+                me->SetCreateHealth(pInfo->health / 3);
+                me->SetByteValue(UNIT_FIELD_BYTES_0, 3, MAX_POWERS);
+            }
             else
             {
                 me->SetCreateMana(pInfo->mana);
@@ -672,6 +738,11 @@ void bot_pet_ai::SetPetStats(bool force)
     // SEA WITCH
     //Spd     x1.0  -- spd
     //rest is same as warlock
+    // CRYPT LORD
+    //AP      x0.40 -- attack power
+    //Resist  x1.0  -- resistances
+    //Stamina x1.5  -- stamina
+    //Spd     x1.0  -- spd
 
     //attack power
     if (force)
@@ -706,6 +777,21 @@ void bot_pet_ai::SetPetStats(bool force)
             me->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(level));
             me->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(level + level / 3));
         }
+        else if (myType == BOT_PET_CARRION_BEETLE1)
+        {
+            me->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(level / 2 + 2));
+            me->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(level / 4 * 3 + 2));
+        }
+        else if (myType == BOT_PET_CARRION_BEETLE2)
+        {
+            me->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(level / 4 * 3 + 8));
+            me->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(level + level / 2 + 8));
+        }
+        else if (myType == BOT_PET_CARRION_BEETLE3)
+        {
+            me->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(level + level / 2 + 10));
+            me->SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(level + level / 4 * 3 + 15));
+        }
         else
         {
             me->SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(level - (level / 4)));
@@ -734,6 +820,18 @@ void bot_pet_ai::SetPetStats(bool force)
             break;
         case BOT_PET_NECROSKELETON:
             atpower += 2 * me->GetTotalStatValue(STAT_STRENGTH) - 20.0f;
+            break;
+        case BOT_PET_CARRION_BEETLE1:
+            atpower += 2 * me->GetTotalStatValue(STAT_STRENGTH) - 20.0f;
+            atpower += 0.15f * petOwner->GetTotalAttackPowerValue(BASE_ATTACK);
+            break;
+        case BOT_PET_CARRION_BEETLE2:
+            atpower += 2 * me->GetTotalStatValue(STAT_STRENGTH) - 15.0f;
+            atpower += 0.20f * petOwner->GetTotalAttackPowerValue(BASE_ATTACK);
+            break;
+        case BOT_PET_CARRION_BEETLE3:
+            atpower += 2 * me->GetTotalStatValue(STAT_STRENGTH) - 10.0f;
+            atpower += 0.25f * petOwner->GetTotalAttackPowerValue(BASE_ATTACK);
             break;
         default:
             //atpower += 2 * me->GetTotalStatValue(STAT_STRENGTH) - 20.0f;
@@ -795,6 +893,10 @@ void bot_pet_ai::SetPetStats(bool force)
         //even though skeletons have shields their armor needs to be very low
         myarmor = myarmor / 4;
     }
+    else if (petOwner->GetBotClass() == BOT_CLASS_CRYPT_LORD)
+    {
+        myarmor /= 3;
+    }
     me->SetStatFlatModifier(UNIT_MOD_ARMOR, BASE_VALUE, float(myarmor));
     me->UpdateArmor();
     //resistances
@@ -809,6 +911,9 @@ void bot_pet_ai::SetPetStats(bool force)
             case BOT_CLASS_DARK_RANGER:
             case BOT_CLASS_NECROMANCER:
                 petResist = (petOwner->GetBotAI()->GetBotResistanceBonus(SpellSchools(i)) + petOwner->GetResistance(SpellSchools(i)))*0.3f;
+                break;
+            case BOT_CLASS_CRYPT_LORD:
+                petResist = (petOwner->GetBotAI()->GetBotResistanceBonus(SpellSchools(i)) + petOwner->GetResistance(SpellSchools(i)))*1.0f;
                 break;
             default:
                 petResist = (petOwner->GetBotAI()->GetBotResistanceBonus(SpellSchools(i)) + petOwner->GetResistance(SpellSchools(i)))*0.4f;
@@ -842,6 +947,7 @@ void bot_pet_ai::SetPetStats(bool force)
                 break;
             case BOT_CLASS_DARK_RANGER:
             case BOT_CLASS_NECROMANCER:
+            case BOT_CLASS_CRYPT_LORD:
                 amount += petOwner->GetCreatureCritChance() * 0.35f;
                 break;
             default:
@@ -1062,6 +1168,23 @@ void bot_pet_ai::SetPetStats(bool force)
         {
             amount += 25;
         }
+        if (petOwner->GetBotClass() == BOT_CLASS_CRYPT_LORD)
+        {
+            switch (myType)
+            {
+                case BOT_PET_CARRION_BEETLE1:
+                    amount += 10;
+                    break;
+                case BOT_PET_CARRION_BEETLE2:
+                    amount += 15;
+                    break;
+                case BOT_PET_CARRION_BEETLE3:
+                    amount += 20;
+                    break;
+                default:
+                    break;
+            }
+        }
 
         dmgtaken->ChangeAmount(amount);
     }
@@ -1114,6 +1237,22 @@ void bot_pet_ai::SetPetStats(bool force)
             break;
         case BOT_CLASS_NECROMANCER:
             stamValue += 0.75f * petOwner->GetBotAI()->GetTotalBotStat(BOT_STAT_MOD_STAMINA);
+            break;
+        case BOT_CLASS_CRYPT_LORD:
+            switch (myType)
+            {
+                case BOT_PET_CARRION_BEETLE1:
+                    stamValue += 0.25f * petOwner->GetBotAI()->GetTotalBotStat(BOT_STAT_MOD_STAMINA);
+                    break;
+                case BOT_PET_CARRION_BEETLE2:
+                    stamValue += 0.40f * petOwner->GetBotAI()->GetTotalBotStat(BOT_STAT_MOD_STAMINA);
+                    break;
+                case BOT_PET_CARRION_BEETLE3:
+                    stamValue += 0.70f * petOwner->GetBotAI()->GetTotalBotStat(BOT_STAT_MOD_STAMINA);
+                    break;
+                default:
+                    break;
+            }
             break;
         default:
             break;
@@ -1212,12 +1351,18 @@ void bot_pet_ai::SetPetStats(bool force)
 //This means that anyone who attacks party will be attacked by whole bot party (see GetTarget())
 void bot_pet_ai::OnOwnerDamagedBy(Unit* attacker)
 {
+    switch (myType)
+    {
+        case BOT_PET_TORNADO:
+        case BOT_PET_LOCUST_SWARM:
+            return;
+        default:
+            break;
+    }
+
     if (petOwner->GetBotAI()->HasBotCommandState(BOT_COMMAND_MASK_UNMOVING))
         return;
-    if (me->GetVictim() && (!IAmFree() || me->GetDistance(me->GetVictim()) < me->GetDistance(attacker)))
-        return;
-
-    if (!me->IsValidAttackTarget(attacker) || !attacker->isTargetableForAttack() || IsInBotParty(attacker))
+    if (!petOwner->GetBotAI()->CanBotAttack(attacker))
         return;
 
     SetBotCommandState(BOT_COMMAND_COMBATRESET);
@@ -1252,7 +1397,7 @@ bool bot_pet_ai::IsInBotParty(Unit const* unit) const
             return false;
 
         return
-            (unit->GetTypeId() == TYPEID_PLAYER || unit->ToCreature()->IsPet() || unit->ToCreature()->IsNPCBot() || unit->ToCreature()->IsNPCBotPet()) &&
+            (unit->GetTypeId() == TYPEID_PLAYER || unit->ToCreature()->IsPet() || unit->IsNPCBot() || unit->IsNPCBotPet()) &&
             (unit->GetFaction() == me->GetFaction() ||
             (me->GetReactionTo(unit) >= REP_FRIENDLY && unit->GetReactionTo(me) >= REP_FRIENDLY));
     }
@@ -1373,7 +1518,7 @@ Unit* bot_pet_ai::_getTarget(bool &reset) const
     {
         dropTarget = IAmFree() ?
             petOwner->GetDistance(mytar) > foldist :
-            (petOwner->GetBotOwner()->GetDistance(mytar) > foldist || (petOwner->GetBotOwner()->GetDistance(mytar) > foldist * 0.75f && !mytar->IsWithinLOSInMap(petOwner)));
+            (petOwner->GetBotOwner()->GetDistance(mytar) > foldist || (petOwner->GetBotOwner()->GetDistance(mytar) > foldist * 0.75f && !mytar->IsWithinLOSInMap(petOwner, LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::M2)));
     }
     if (dropTarget)
         return nullptr;
@@ -1494,7 +1639,7 @@ void bot_pet_ai::GetInPosition(bool force, Unit* newtarget, Position* mypos)
             attackpos.m_positionY = mypos->m_positionY;
             attackpos.m_positionZ = mypos->m_positionZ;
         }
-        if (me->GetExactDist2d(&attackpos) > 4.f || !me->IsWithinLOSInMap(newtarget))
+        if (me->GetExactDist2d(&attackpos) > 4.f || !me->IsWithinLOSInMap(newtarget, LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::M2))
         {
             me->GetMotionMaster()->MovePoint(newtarget->GetMapId(), attackpos);
             if (!me->HasUnitState(UNIT_STATE_MELEE_ATTACKING))
@@ -1553,6 +1698,10 @@ bool bot_pet_ai::_canRegenerate() const
         case BOT_PET_DARK_MINION_ELITE:
         case BOT_PET_NECROSKELETON:
         case BOT_PET_TORNADO:
+        case BOT_PET_CARRION_BEETLE1:
+        case BOT_PET_CARRION_BEETLE2:
+        case BOT_PET_CARRION_BEETLE3:
+        case BOT_PET_LOCUST_SWARM:
             return false;
         default:
             return true;
@@ -1974,7 +2123,7 @@ bool bot_pet_ai::Wait()
         return true;
 
     if (IAmFree())
-        waitTimer = me->IsInCombat() ? 500 : ((__rand + 100) * 50);
+        waitTimer = me->IsInCombat() ? 250 : ((__rand + 100) * 20);
     else if (!me->GetMap()->IsRaid())
         waitTimer = std::min<uint32>(uint32(50 * (petOwner->GetBotOwner()->GetNpcBotsCount() - 1) + __rand + __rand), 500);
     else
@@ -2068,6 +2217,11 @@ void bot_pet_ai::JustDied(Unit*)
     KillEvents(false);
 }
 
+void bot_pet_ai::KilledUnit(Unit* u)
+{
+    GetPetsOwner()->GetBotAI()->KilledUnit(u);
+}
+
 void bot_pet_ai::AttackStart(Unit* /*u*/)
 {
 }
@@ -2101,6 +2255,7 @@ void bot_pet_ai::IsSummonedBy(WorldObject* summoner)
     myType = me->GetEntry();
     //myType = petOwner->GetBotAI()->GetAIMiscValue(BOTAI_MISC_PET_TYPE);
     //ASSERT(myType);
+    me->setActive(true);
     ASSERT(!me->GetBotAI());
     ASSERT(!me->GetBotPetAI());
     me->SetBotPetAI(this);
@@ -2188,6 +2343,11 @@ bool bot_pet_ai::GlobalUpdate(uint32 diff)
             if (me->GetByteValue(UNIT_FIELD_BYTES_2, 1) != petOwner->GetByteValue(UNIT_FIELD_BYTES_2, 1))
                 me->SetByteValue(UNIT_FIELD_BYTES_2, 1, petOwner->GetByteValue(UNIT_FIELD_BYTES_2, 1));
         }
+        if (myType == BOT_PET_LOCUST_SWARM)
+        {
+            me->SetFloatValue(UNIT_FIELD_BOUNDINGRADIUS, 2.0f * DEFAULT_PLAYER_BOUNDING_RADIUS * me->GetObjectScale());
+            me->SetFloatValue(UNIT_FIELD_COMBATREACH,  2.0f * DEFAULT_PLAYER_COMBAT_REACH * me->GetObjectScale());
+        }
     }
 
     if (!me->IsAlive())
@@ -2200,9 +2360,11 @@ bool bot_pet_ai::GlobalUpdate(uint32 diff)
         for (uint8 i = CURRENT_FIRST_NON_MELEE_SPELL; i != CURRENT_AUTOREPEAT_SPELL; ++i)
         {
             interrupt = false;
-            Spell const* spell = me->GetCurrentSpell(CurrentSpellTypes(i));
+            Spell* spell = me->GetCurrentSpell(CurrentSpellTypes(i));
             if (!spell)
                 continue;
+            if (spell->m_targets.GetObjectTargetGUID().IsAnyTypeCreature())
+                spell->m_targets.Update(me);
             Unit const* target = spell->m_targets.GetUnitTarget();
             if (!target)
                 continue;
@@ -2290,6 +2452,7 @@ bool bot_pet_ai::GlobalUpdate(uint32 diff)
                 switch (me->GetEntry())
                 {
                     case BOT_PET_TORNADO:
+                    case BOT_PET_LOCUST_SWARM:
                         break;
                     default:
                         me->ClearUnitState(UNIT_STATE_IGNORE_PATHFINDING);
@@ -2347,13 +2510,17 @@ bool bot_pet_ai::GlobalUpdate(uint32 diff)
 
     CheckAttackState();
 
+    //second alive check - CheckAttackState() can cause bot to die
+    if (!me->IsAlive())
+        return false;
+
     if (checkAurasTimer <= lastdiff)
     {
         Unit* victim = me->GetVictim();
         checkAurasTimer += uint32(__rand + __rand + (IAmFree() ? 1000 : 40 * (1 + petOwner->GetBotOwner()->GetNpcBotsCount())));
 
         if (!HasBotCommandState(BOT_COMMAND_MASK_UNCHASE) && victim && !CCed(me, true) &&
-            !me->isMoving() && !IsCasting() && me->GetEntry() != BOT_PET_TORNADO)
+            !me->isMoving() && !IsCasting() && myType != BOT_PET_TORNADO && myType != BOT_PET_LOCUST_SWARM)
         {
             if (!IAmFree() && petOwner->GetBotOwner()->GetBotMgr()->GetBotAttackRangeMode() == BOT_ATTACK_RANGE_EXACT &&
                 petOwner->GetBotOwner()->GetBotMgr()->GetBotExactAttackRange() == 0)
@@ -2368,7 +2535,7 @@ bool bot_pet_ai::GlobalUpdate(uint32 diff)
             else
             {
                 CalculateAttackPos(victim, attackpos);
-                if (me->GetExactDist2d(&attackpos) > 4.f || !me->IsWithinLOSInMap(victim))
+                if (me->GetExactDist2d(&attackpos) > 4.f || !me->IsWithinLOSInMap(victim, LINEOFSIGHT_ALL_CHECKS, VMAP::ModelIgnoreFlags::M2))
                     GetInPosition(true, victim, &attackpos);
             }
         }
@@ -2428,6 +2595,14 @@ bool bot_pet_ai::JumpingOrFalling() const
 bool bot_pet_ai::Jumping() const
 {
     return me->HasUnitState(UNIT_STATE_JUMPING);
+}
+bool bot_pet_ai::IsIndoors() const
+{
+    return indoorsTimer >= INOUTDOORS_ENSURE_TIMER && outdoorsTimer == 0;
+}
+bool bot_pet_ai::IsOutdoors() const
+{
+    return outdoorsTimer >= INOUTDOORS_ENSURE_TIMER && indoorsTimer == 0;
 }
 
 uint32 bot_pet_ai::GetLostHP(Unit const* unit)

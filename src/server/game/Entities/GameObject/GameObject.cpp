@@ -374,6 +374,35 @@ bool GameObject::Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, u
                 m_invisibility.AddFlag(INVISIBILITY_TRAP);
                 m_invisibility.AddValue(INVISIBILITY_TRAP, 300);
             }
+
+            m_goValue.Trap.TargetSearcherCheckType = TARGET_CHECK_ENEMY;
+            if (SpellInfo const* trapSpell = sSpellMgr->GetSpellInfo(goinfo->trap.spellId))
+            {
+                // positive spells may require enemy targets
+                if (trapSpell->IsPositive())
+                {
+                    bool targetsAlly = false;
+                    bool targetsEnemy = false;
+                    auto isAllyTarget = [](SpellImplicitTargetInfo const& targetInfo)
+                    {
+                        return targetInfo.GetObjectType() == TARGET_OBJECT_TYPE_UNIT && targetInfo.GetCheckType() == TARGET_CHECK_ALLY;
+                    };
+                    auto isEnemyTarget = [](SpellImplicitTargetInfo const& targetInfo)
+                    {
+                        return targetInfo.GetObjectType() == TARGET_OBJECT_TYPE_UNIT && targetInfo.GetCheckType() == TARGET_CHECK_ENEMY;
+                    };
+                    for (SpellEffectInfo const& spellEffectInfo : trapSpell->GetEffects())
+                    {
+                        if (!spellEffectInfo.IsEffect())
+                            continue;
+
+                        targetsAlly = targetsAlly || isAllyTarget(spellEffectInfo.TargetA) || isAllyTarget(spellEffectInfo.TargetB);
+                        targetsEnemy = targetsEnemy || isEnemyTarget(spellEffectInfo.TargetA) || isEnemyTarget(spellEffectInfo.TargetB);
+                    }
+                    if (targetsAlly)
+                        m_goValue.Trap.TargetSearcherCheckType = targetsEnemy ? TARGET_CHECK_DEFAULT : TARGET_CHECK_ALLY;
+                }
+            }
             break;
         default:
             SetGoAnimProgress(animprogress);
@@ -651,10 +680,21 @@ void GameObject::Update(uint32 diff)
                     /// @todo this hack with search required until GO casting not implemented
                     if (GetOwner())
                     {
-                        // Hunter trap: Search units which are unfriendly to the trap's owner
-                        Trinity::NearestAttackableNoTotemUnitInObjectRangeCheck checker(this, radius);
-                        Trinity::UnitLastSearcher<Trinity::NearestAttackableNoTotemUnitInObjectRangeCheck> searcher(this, target, checker);
-                        Cell::VisitAllObjects(this, searcher, radius);
+                        // summoned traps: Search targets fit to trap spell data
+                        if (SpellInfo const* trapSpell = sSpellMgr->GetSpellInfo(goInfo->trap.spellId))
+                        {
+                            WorldObject* worldObjectTarget = nullptr;
+                            Trinity::WorldObjectSpellNearbyTargetCheck checker(radius, this, trapSpell, m_goValue.Trap.TargetSearcherCheckType, nullptr);
+                            Trinity::WorldObjectLastSearcher searcher(this, worldObjectTarget, checker, GRID_MAP_TYPE_MASK_CREATURE | GRID_MAP_TYPE_MASK_PLAYER);
+                            Cell::VisitAllObjects(this, searcher, radius);
+                            target = Object::ToUnit(worldObjectTarget);
+                        }
+                        else
+                        {
+                            Trinity::NearestAttackableNoTotemUnitInObjectRangeCheck checker(this, radius);
+                            Trinity::UnitLastSearcher<Trinity::NearestAttackableNoTotemUnitInObjectRangeCheck> searcher(this, target, checker);
+                            Cell::VisitAllObjects(this, searcher, radius);
+                        }
                     }
                     else
                     {
@@ -1240,12 +1280,12 @@ void GameObject::SaveRespawnTime(uint32 forceDelay)
     }
 }
 
-bool GameObject::IsNeverVisible() const
+bool GameObject::IsNeverVisible(bool allowServersideObjects) const
 {
-    if (WorldObject::IsNeverVisible())
+    if (WorldObject::IsNeverVisible(allowServersideObjects))
         return true;
 
-    if (GetGOInfo()->GetServerOnly())
+    if (GetGOInfo()->GetServerOnly() && !allowServersideObjects)
         return true;
 
     return false;
@@ -2033,6 +2073,20 @@ void GameObject::Use(Unit* user)
 
         case GAMEOBJECT_TYPE_FLAGSTAND:                     // 24
         {
+            //npcbot
+            if (user->IsNPCBot())
+            {
+                Creature* bot = user->ToCreature();
+                if (Battleground* botbg = bot->GetBotBG())
+                {
+                    bot->RemoveAurasByType(SPELL_AURA_MOD_STEALTH);
+                    bot->RemoveAurasByType(SPELL_AURA_MOD_INVISIBILITY);
+                    botbg->EventBotClickedOnFlag(bot, this);
+                    return;
+                }
+            }
+            //end npcbot
+
             if (user->GetTypeId() != TYPEID_PLAYER)
                 return;
 
@@ -2077,6 +2131,38 @@ void GameObject::Use(Unit* user)
 
         case GAMEOBJECT_TYPE_FLAGDROP:                      // 26
         {
+            //npcbot
+            if (user->IsNPCBot())
+            {
+                Creature* bot = user->ToCreature();
+                if (Battleground* botbg = bot->GetBotBG())
+                {
+                    bot->RemoveAurasByType(SPELL_AURA_MOD_STEALTH);
+                    bot->RemoveAurasByType(SPELL_AURA_MOD_INVISIBILITY);
+
+                    if (GameObjectTemplate const* bgoinfo = GetGOInfo())
+                    {
+                        switch (bgoinfo->entry)
+                        {
+                            case 179785:                        // Silverwing Flag
+                            case 179786:                        // Warsong Flag
+                                if (botbg->GetTypeID(true) == BATTLEGROUND_WS)
+                                    botbg->EventBotClickedOnFlag(bot, this);
+                                break;
+                            case 184142:                        // Netherstorm Flag
+                                if (botbg->GetTypeID(true) == BATTLEGROUND_EY)
+                                    botbg->EventBotClickedOnFlag(bot, this);
+                                break;
+                        }
+                    }
+                    //this cause to call return, all flags must be deleted here!!
+                    spellId = 0;
+                    Delete();
+                    break;
+                }
+            }
+            //end npcbot
+
             if (user->GetTypeId() != TYPEID_PLAYER)
                 return;
 

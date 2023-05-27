@@ -453,7 +453,7 @@ int32 SpellEffectInfo::CalcValue(WorldObject const* caster /*= nullptr*/, int32 
             pointsPerComboPoint = 2500.f;
         }
         //npcbot: bonus amount from combo points and specific mods
-        if (casterUnit->GetTypeId() == TYPEID_UNIT && casterUnit->ToCreature()->IsNPCBot())
+        if (casterUnit->IsNPCBot())
         {
             if (uint8 comboPoints = casterUnit->ToCreature()->GetCreatureComboPoints())
                 value += pointsPerComboPoint * comboPoints;
@@ -463,7 +463,7 @@ int32 SpellEffectInfo::CalcValue(WorldObject const* caster /*= nullptr*/, int32 
             PointsPerComboPoint)
         {
             Unit const* bot = casterUnit->GetCharmer();
-            if (bot && bot->ToCreature()->IsNPCBot())
+            if (bot && bot->IsNPCBot())
                 if (uint8 comboPoints = bot->ToCreature()->GetCreatureComboPoints())
                     value += pointsPerComboPoint * comboPoints;
         }
@@ -554,7 +554,7 @@ float SpellEffectInfo::CalcValueMultiplier(WorldObject* caster, Spell* spell /*=
         modOwner->ApplySpellMod(_spellInfo->Id, SPELLMOD_VALUE_MULTIPLIER, multiplier, spell);
 
     //npcbot - apply bot spell effect value mult mods
-    if (caster && caster->GetTypeId() == TYPEID_UNIT && caster->ToCreature()->IsNPCBot())
+    if (caster && caster->IsNPCBot())
         BotMgr::ApplyBotEffectValueMultiplierMods(caster->ToCreature(), _spellInfo, EffectIndex, multiplier);
     //end npcbot
 
@@ -903,7 +903,7 @@ SpellInfo::~SpellInfo()
 
 SpellInfo const* SpellInfo::TryGetSpellInfoOverride(WorldObject const* caster) const
 {
-    SpellInfo const* spellInfoOverride = (caster && caster->IsCreature() && caster->ToCreature()->GetBotClass() >= BOT_CLASS_EX_START) ? GetBotSpellInfoOverride(Id) : nullptr;
+    SpellInfo const* spellInfoOverride = (caster && caster->IsNPCBotOrPet()) ? GetBotSpellInfoOverride(Id) : nullptr;
     return spellInfoOverride ? spellInfoOverride : this;
 }
 
@@ -1659,7 +1659,7 @@ SpellCastResult SpellInfo::CheckTarget(WorldObject const* caster, WorldObject co
     if (HasAttribute(SPELL_ATTR1_CANT_TARGET_SELF) && caster == target)
         return SPELL_FAILED_BAD_TARGETS;
 
-    // check visibility - ignore stealth for implicit (area) targets
+    // check visibility - ignore invisibility/stealth for implicit (area) targets
     if (!HasAttribute(SPELL_ATTR6_CAN_TARGET_INVISIBLE) && !caster->CanSeeOrDetect(target, implicit))
         return SPELL_FAILED_BAD_TARGETS;
 
@@ -1733,7 +1733,7 @@ SpellCastResult SpellInfo::CheckTarget(WorldObject const* caster, WorldObject co
     // corpseOwner and unit specific target checks
     if (HasAttribute(SPELL_ATTR3_ONLY_TARGET_PLAYERS) && unitTarget->GetTypeId() != TYPEID_PLAYER)
         //npcbot: allow to target bots
-        if (!(unitTarget->GetTypeId() == TYPEID_UNIT && unitTarget->ToCreature()->IsNPCBot()))
+        if (!unitTarget->IsNPCBot())
         //end npcbot
        return SPELL_FAILED_TARGET_NOT_PLAYER;
 
@@ -3297,7 +3297,7 @@ int32 SpellInfo::CalcPowerCost(WorldObject const* caster, SpellSchoolMask school
     }
 
     //npcbot - apply bot spell cost mods
-    if (powerCost > 0 && caster->GetTypeId() == TYPEID_UNIT && caster->ToCreature()->IsNPCBot())
+    if (powerCost > 0 && caster->IsNPCBot())
         caster->ToCreature()->ApplyCreatureSpellCostMods(this, powerCost);
     //end npcbot
 

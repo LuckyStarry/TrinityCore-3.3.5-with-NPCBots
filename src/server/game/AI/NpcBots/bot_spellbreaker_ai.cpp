@@ -150,6 +150,8 @@ public:
             if (IsCasting())
                 return;
 
+            CheckUsableItems(diff);
+
             Attack(diff);
         }
 
@@ -160,6 +162,10 @@ public:
                 return;
 
             StartAttack(mytar, IsMelee());
+
+            CheckAttackState();
+            if (!me->IsAlive() || !mytar->IsAlive())
+                return;
 
             MoveBehind(mytar);
         }

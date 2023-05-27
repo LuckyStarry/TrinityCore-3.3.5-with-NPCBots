@@ -1899,7 +1899,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         void SendBGWeekendWorldStates() const;
         void SendBattlefieldWorldStates() const;
 
-        void SendAurasForTarget(Unit* target) const;
+        void SendAurasForTarget(Unit* target, bool force = false) const;
 
         PlayerMenu* PlayerTalkClass;
         std::vector<ItemSetEffect*> ItemSetEff;
@@ -2030,7 +2030,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
 
         bool HaveAtClient(Object const* u) const;
 
-        bool IsNeverVisible() const override;
+        bool IsNeverVisible(bool allowServersideObjects) const override;
 
         bool IsVisibleGloballyFor(Player const* player) const;
 
@@ -2202,7 +2202,6 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
         /*****************************************************************/
         /***                        NPCBOT SYSTEM                      ***/
         /*****************************************************************/
-        void SetBotMgr(BotMgr* mgr) { ASSERT (!_botMgr); _botMgr = mgr; }
         BotMgr* GetBotMgr() const { return _botMgr; }
         bool HaveBot() const;
         uint8 GetNpcBotsCount() const;
