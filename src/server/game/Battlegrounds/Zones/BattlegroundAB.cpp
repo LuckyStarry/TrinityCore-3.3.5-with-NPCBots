@@ -386,14 +386,14 @@ void BattlegroundAB::_SendNodeUpdate(uint8 node)
 void BattlegroundAB::_NodeOccupied(uint8 node, Team team)
 {
     if (!AddSpiritGuide(node, BG_AB_SpiritGuidePos[node], GetTeamIndexByTeamId(team)))
-        TC_LOG_ERROR("bg.battleground", "Failed to spawn spirit guide! point: %u, team: %u, ", node, team);
+        TC_LOG_ERROR("bg.battleground", "Failed to spawn spirit guide! point: {}, team: {}, ", node, team);
 
     if (node >= BG_AB_DYNAMIC_NODES_COUNT)//only dynamic nodes, no start points
         return;
 
     uint8 capturedNodes = 0;
     for (uint8 i = 0; i < BG_AB_DYNAMIC_NODES_COUNT; ++i)
-        if (m_Nodes[i] == GetTeamIndexByTeamId(team) + BG_AB_NODE_TYPE_OCCUPIED && !m_NodeTimers[i])
+        if (m_Nodes[i] == uint8(GetTeamIndexByTeamId(team)) + BG_AB_NODE_TYPE_OCCUPIED && !m_NodeTimers[i])
             ++capturedNodes;
 
     if (capturedNodes >= 5)
@@ -487,7 +487,7 @@ void BattlegroundAB::EventPlayerClickedOnFlag(Player* source, GameObject* /*targ
         {
             UpdatePlayerScore(source, SCORE_BASES_ASSAULTED, 1);
             m_prevNodes[node] = m_Nodes[node];
-            m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_CONTESTED;
+            m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_CONTESTED;
             // burn current contested banner
             _DelBanner(node, BG_AB_NODE_TYPE_CONTESTED, !teamIndex);
             // create new contested banner
@@ -505,7 +505,7 @@ void BattlegroundAB::EventPlayerClickedOnFlag(Player* source, GameObject* /*targ
         {
             UpdatePlayerScore(source, SCORE_BASES_DEFENDED, 1);
             m_prevNodes[node] = m_Nodes[node];
-            m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_OCCUPIED;
+            m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_OCCUPIED;
             // burn current contested banner
             _DelBanner(node, BG_AB_NODE_TYPE_CONTESTED, !teamIndex);
             // create new occupied banner
@@ -526,7 +526,7 @@ void BattlegroundAB::EventPlayerClickedOnFlag(Player* source, GameObject* /*targ
     {
         UpdatePlayerScore(source, SCORE_BASES_ASSAULTED, 1);
         m_prevNodes[node] = m_Nodes[node];
-        m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_CONTESTED;
+        m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_CONTESTED;
         // burn current occupied banner
         _DelBanner(node, BG_AB_NODE_TYPE_OCCUPIED, !teamIndex);
         // create new contested banner
@@ -574,7 +574,7 @@ void BattlegroundAB::EventBotClickedOnFlag(Creature* bot, GameObject* /*target_o
         return;
     }
 
-    TeamId teamIndex = GetPlayerTeamId(bot->GetGUID());
+    TeamId teamIndex = GetBotTeamId(bot->GetGUID());
 
     // Check if player really could use this banner, not cheated
     if (!(m_Nodes[node] == 0 || teamIndex == m_Nodes[node]%2))
@@ -610,7 +610,7 @@ void BattlegroundAB::EventBotClickedOnFlag(Creature* bot, GameObject* /*target_o
         {
             UpdateBotScore(bot, SCORE_BASES_ASSAULTED, 1);
             m_prevNodes[node] = m_Nodes[node];
-            m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_CONTESTED;
+            m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_CONTESTED;
             // burn current contested banner
             _DelBanner(node, BG_AB_NODE_TYPE_CONTESTED, !teamIndex);
             // create new contested banner
@@ -628,7 +628,7 @@ void BattlegroundAB::EventBotClickedOnFlag(Creature* bot, GameObject* /*target_o
         {
             UpdateBotScore(bot, SCORE_BASES_DEFENDED, 1);
             m_prevNodes[node] = m_Nodes[node];
-            m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_OCCUPIED;
+            m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_OCCUPIED;
             // burn current contested banner
             _DelBanner(node, BG_AB_NODE_TYPE_CONTESTED, !teamIndex);
             // create new occupied banner
@@ -649,7 +649,7 @@ void BattlegroundAB::EventBotClickedOnFlag(Creature* bot, GameObject* /*target_o
     {
         UpdateBotScore(bot, SCORE_BASES_ASSAULTED, 1);
         m_prevNodes[node] = m_Nodes[node];
-        m_Nodes[node] = teamIndex + BG_AB_NODE_TYPE_CONTESTED;
+        m_Nodes[node] = uint8(teamIndex) + BG_AB_NODE_TYPE_CONTESTED;
         // burn current occupied banner
         _DelBanner(node, BG_AB_NODE_TYPE_OCCUPIED, !teamIndex);
         // create new contested banner
@@ -912,7 +912,7 @@ void BattlegroundAB::HandleBotKillPlayer(Creature* killer, Player* victim)
         return;
 
     Battleground::HandleBotKillPlayer(killer, victim);
-    //RewardKillScore(GetPlayerTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
+    //RewardKillScore(GetBotTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
 }
 void BattlegroundAB::HandleBotKillBot(Creature* killer, Creature* victim)
 {
@@ -920,7 +920,7 @@ void BattlegroundAB::HandleBotKillBot(Creature* killer, Creature* victim)
         return;
 
     Battleground::HandleBotKillBot(killer, victim);
-    //RewardKillScore(GetPlayerTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
+    //RewardKillScore(GetBotTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
 }
 void BattlegroundAB::HandlePlayerKillBot(Creature* victim, Player* killer)
 {
@@ -928,7 +928,7 @@ void BattlegroundAB::HandlePlayerKillBot(Creature* victim, Player* killer)
         return;
 
     Battleground::HandlePlayerKillBot(victim, killer);
-    //RewardKillScore(GetPlayerTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
+    //RewardKillScore(GetBotTeamId(killer->GetGUID()), BG_AB_TickPoints[1]);
 }
 //end npcbot
 

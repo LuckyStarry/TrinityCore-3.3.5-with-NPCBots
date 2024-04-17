@@ -2,6 +2,7 @@
 #include "botmgr.h"
 #include "botspell.h"
 #include "bottraits.h"
+#include "Containers.h"
 #include "Group.h"
 #include "Log.h"
 #include "Map.h"
@@ -277,7 +278,7 @@ public:
                     return;
             }
 
-            if (!hasSoulstone && !IAmFree() && GetSpell(CREATE_SOULSTONE_1))
+            if (!hasSoulstone && GetSpell(CREATE_SOULSTONE_1))
             {
                 if (doCast(me, GetSpell(CREATE_SOULSTONE_1)))
                     return;
@@ -292,56 +293,45 @@ public:
 
             //TODO: soulstone on self/bots
             //BUG: players cannot accept this buff if they are below lvl 20 (should be 8)
-            if (!IAmFree() && hasSoulstone && soulstoneTimer <= diff && GetSpell(CREATE_SOULSTONE_1))
+            if (hasSoulstone && soulstoneTimer <= diff && GetSpell(CREATE_SOULSTONE_1))
             {
-                Group const* gr = master->GetGroup();
-                Unit* u = master;
-                if (!gr)
+                std::vector<Unit*> targets;
+
+                if (!IAmFree())
                 {
-                    if (!u->IsAlive() || u->isPossessed() || u->IsCharmed() ||
-                        me->GetDistance(u) > 30 || u->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
-                        u = nullptr;
-                }
-                else
-                {
-                    //check rezzers first
-                    for (GroupReference const* itr = gr->GetFirstMember(); itr != nullptr; itr = itr->next())
+                    std::vector<Unit*> all_members = BotMgr::GetAllGroupMembers(master->GetGroup());
+                    for (uint8 i = 0; i < 3; ++i)
                     {
-                        u = itr->GetSource();
-                        if (!u || u->GetLevel() < 20 || !u->IsAlive() || me->GetMap() != u->FindMap() ||
-                            u->isPossessed() || u->IsCharmed() || me->GetDistance(u) > 30 ||
-                            u->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
-                        {
-                            u = nullptr;
-                            continue;
-                        }
-                        if (u->GetClass() == CLASS_PRIEST || u->GetClass() == CLASS_PALADIN ||
-                            u->GetClass() == CLASS_DRUID || u->GetClass() == CLASS_SHAMAN)
+                        if (i > 0 && !targets.empty())
                             break;
-                    }
-                    if (!u)
-                    {
-                        for (GroupReference const* itr = gr->GetFirstMember(); itr != nullptr; itr = itr->next())
+                        for (Unit* member : all_members)
                         {
-                            u = itr->GetSource();
-                            if (!u || u->GetLevel() < 20 || !u->IsAlive() || me->GetMap() != u->FindMap() ||
-                                u->isPossessed() || u->IsCharmed() || me->GetDistance(u) > 30 ||
-                                u->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
+                            if ((i >= 2 || (i == 0 ? member->IsPlayer() : member->IsNPCBot())) && me->GetMap() == member->FindMap() &&
+                                member->IsAlive() && !member->isPossessed() && !member->IsCharmed() &&
+                                !(member->IsNPCBot() && member->ToCreature()->IsTempBot()) &&
+                                me->GetDistance(member) < 30 && !member->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
                             {
-                                u = nullptr;
-                                continue;
+                                if (i >= 2 || member->GetClass() == CLASS_PRIEST || member->GetClass() == CLASS_PALADIN ||
+                                    member->GetClass() == CLASS_DRUID || member->GetClass() == CLASS_SHAMAN)
+                                {
+                                    targets.push_back(member);
+                                }
                             }
-                            break;
                         }
                     }
                 }
 
-                if (u)
+                if (targets.empty() && master->IsAlive() && !master->isPossessed() && !master->IsCharmed() &&
+                    me->GetDistance(master) < 30 && !master->GetDummyAuraEffect(SPELLFAMILY_GENERIC, 92, 0))
+                    targets.push_back(master);
+
+                if (!targets.empty())
                 {
+                    Unit* target = targets.size() == 1 ? targets.front() : Trinity::Containers::SelectRandomContainerElement(targets);
                     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(CREATE_SOULSTONE_1);
                     uint32 rank = spellInfo->GetRank();
 
-                    while (rank < 7 && u->GetLevel() > spellInfo->SpellLevel && spellInfo->GetNextRankSpell())
+                    while (rank + 1 < std::size(_healthStoneSpells) && target->GetLevel() > spellInfo->SpellLevel && spellInfo->GetNextRankSpell())
                     {
                         spellInfo = spellInfo->GetNextRankSpell();
                         rank = spellInfo->GetRank();
@@ -358,11 +348,11 @@ public:
                         case 27238: spellId = SOULSTONE_RESURRECTION_6; break; //rank 6
                         case 47884: spellId = SOULSTONE_RESURRECTION_7; break; //rank 7
                         default:
-                            TC_LOG_ERROR("entities.player", "bot_warlockAI: unknown soulstone Id %u", spellInfo->Id);
+                            TC_LOG_ERROR("entities.player", "bot_warlockAI: unknown soulstone Id {}", spellInfo->Id);
                             spellId = SOULSTONE_RESURRECTION_1;
                             break;
                     }
-                    me->CastSpell(u, spellId, false);
+                    me->CastSpell(target, spellId, false);
                 }
             }
         }
@@ -659,7 +649,7 @@ public:
                 uint32 healthStone = InitSpell(me, CREATE_HEALTHSTONE_1);
                 SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(healthStone);
                 //ASSERT(spellInfo);
-                uint32 rank = spellInfo->GetRank();
+                uint32 rank = spellInfo ? spellInfo->GetRank() : 1;
                 //ASSERT(rank >= 1 && rank <= 8);
                 spellInfo = sSpellMgr->GetSpellInfo(_healthStoneSpells[rank - 1]);
                 ASSERT(spellInfo);
@@ -1779,7 +1769,6 @@ public:
             myPet->SetFaction(master->GetFaction());
             myPet->SetControlledByPlayer(!IAmFree());
             myPet->SetPvP(me->IsPvP());
-            myPet->SetUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED);
             myPet->SetByteValue(UNIT_FIELD_BYTES_2, 1, master->GetByteValue(UNIT_FIELD_BYTES_2, 1));
 
             //fix scale and equips
@@ -1810,7 +1799,7 @@ public:
         void SummonedCreatureDespawn(Creature* summon) override
         {
             //all warlock bot pets despawn at death or manually (gossip, teleport, etc.)
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: {}'s {}", me->GetName(), summon->GetName());
             if (summon == botPet)
             {
                 petSummonTimer = 10000;

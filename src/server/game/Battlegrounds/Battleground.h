@@ -23,6 +23,8 @@
 #include "ObjectGuid.h"
 #include "Position.h"
 #include "SharedDefines.h"
+#include "UniqueTrackablePtr.h"
+#include <deque>
 #include <map>
 
 namespace WorldPackets
@@ -188,6 +190,13 @@ struct BattlegroundPlayer
     uint32 Team;                                           // Player's team
 };
 
+//npcbot
+struct BattlegroundBot
+{
+    uint32 Team;                                            // bot's team
+};
+//end npcbot
+
 struct BattlegroundObjectInfo
 {
     BattlegroundObjectInfo() : object(nullptr), timer(0), spellid(0) { }
@@ -333,6 +342,10 @@ class TC_GAME_API Battleground
         bool isRated() const        { return m_IsRated; }
 
         typedef std::map<ObjectGuid, BattlegroundPlayer> BattlegroundPlayerMap;
+        //npcbot
+        typedef std::map<ObjectGuid, BattlegroundBot> BattlegroundBotMap;
+        [[nodiscard]] BattlegroundBotMap const& GetBots() const { return m_Bots; }
+        //end npcbot
         BattlegroundPlayerMap const& GetPlayers() const { return m_Players; }
         uint32 GetPlayersSize() const { return m_Players.size(); }
 
@@ -429,15 +442,23 @@ class TC_GAME_API Battleground
 
         //npcbot
         uint32 GetBotScoresSize() const { return BotScores.size(); }
-        TeamId GetPlayerTeamId(ObjectGuid guid) const;
+        void RemoveBotFromResurrectQueue(ObjectGuid guid);
+        uint32 GetBotTeam(ObjectGuid guid) const;
+        TeamId GetBotTeamId(ObjectGuid guid) const;
         TeamId GetOtherTeamId(TeamId teamId) const;
         void AddOrSetBotToCorrectBgGroup(Creature* bot, uint32 team);
+        void RewardXPAtKill(Player* killer, Creature* victim);
+        void RewardXPAtKill(Creature* killer, Player* victim);
+        void RewardXPAtKill(Creature* killer, Creature* victim);
         virtual void AddBot(Creature* bot);
+        virtual void RemoveBotAtLeave(ObjectGuid guid);
         virtual WorldSafeLocsEntry const* GetClosestGraveyardForBot(WorldLocation const& curPos, uint32 team) const;
         virtual bool UpdateBotScore(Creature const* bot, uint32 type, uint32 value, bool doAddHonor = true);
-        virtual void HandleBotKillPlayer(Creature* bot, Player* victim);
-        virtual void HandleBotKillBot(Creature* bot, Creature* victim);
-        virtual void HandlePlayerKillBot(Creature* bot, Player* killer);
+        virtual void RemoveBot(ObjectGuid /*guid*/) {}
+        virtual void HandleBotKillPlayer(Creature* killer, Player* victim);
+        virtual void HandleBotKillBot(Creature* killer, Creature* victim);
+        virtual void HandlePlayerKillBot(Creature* victim, Player* killer);
+        virtual void HandleBotKillUnit(Creature* /*killer*/, Creature* /*victim*/) { }
         virtual void EventBotDroppedFlag(Creature* /*bot*/) { }
         virtual void EventBotClickedOnFlag(Creature* /*bot*/, GameObject* /*target_obj*/) { }
         virtual void HandleBotAreaTrigger(Creature* /*bot*/, uint32 /*trigger*/) { }
@@ -511,6 +532,9 @@ class TC_GAME_API Battleground
         // because BattleGrounds with different types and same level range has different m_BracketId
         uint8 GetUniqueBracketId() const;
 
+        Trinity::unique_weak_ptr<Battleground> GetWeakPtr() const { return m_weakRef; }
+        void SetWeakPtr(Trinity::unique_weak_ptr<Battleground> weakRef) { m_weakRef = std::move(weakRef); }
+
     protected:
         // this method is called, when BG cannot spawn its own spirit guide, or something is wrong, It correctly ends Battleground
         void EndNow();
@@ -532,6 +556,7 @@ class TC_GAME_API Battleground
         BattlegroundScoreMap PlayerScores;                // Player scores
         //npcbot
         BattlegroundScoreMap BotScores;
+        BattlegroundBotMap m_Bots;
         //end npcbot
         // must be implemented in BG subclass
         virtual void RemovePlayer(Player* /*player*/, ObjectGuid /*guid*/, uint32 /*team*/) { }
@@ -611,7 +636,7 @@ class TC_GAME_API Battleground
 
         // Player lists
         GuidVector m_ResurrectQueue;                        // Player GUID
-        GuidDeque m_OfflineQueue;                           // Player GUID
+        std::deque<ObjectGuid> m_OfflineQueue;              // Player GUID
 
         // Invited counters are useful for player invitation to BG - do not allow, if BG is started to one faction to have 2 more players than another faction
         // Invited counters will be changed only when removing already invited player from queue, removing player from battleground and inviting player to BG
@@ -644,5 +669,7 @@ class TC_GAME_API Battleground
         Position StartPosition[PVP_TEAMS_COUNT];
         float m_StartMaxDist;
         uint32 ScriptId;
+
+        Trinity::unique_weak_ptr<Battleground> m_weakRef;
 };
 #endif

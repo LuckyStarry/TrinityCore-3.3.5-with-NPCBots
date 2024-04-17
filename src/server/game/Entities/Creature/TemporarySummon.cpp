@@ -172,7 +172,7 @@ void TempSummon::Update(uint32 diff)
         }
         default:
             UnSummon();
-            TC_LOG_ERROR("entities.unit", "Temporary summoned creature (entry: %u) have unknown type %u of ", GetEntry(), m_type);
+            TC_LOG_ERROR("entities.unit", "Temporary summoned creature (entry: {}) have unknown type {} of ", GetEntry(), m_type);
             break;
     }
 }
@@ -282,19 +282,6 @@ void TempSummon::UnSummon(uint32 msTime)
             owner->ToGameObject()->AI()->SummonedCreatureDespawn(this);
     }
 
-    //npcbot
-    //if (IsNPCBot())
-    //{
-    //    //TC_LOG_ERROR("entities.player", "TempSummon::UnSummon(): Trying to unsummon Bot %s (guidLow: %u owner: %s)", GetName().c_str(), GetGUIDLow(), GetBotOwner()->GetName().c_str());
-    //    if (IsTempBot())
-    //        if (IS_CREATURE_GUID(GetCreatorGUID()))
-    //            if (Unit* bot = sObjectAccessor->FindUnit(GetCreatorGUID()))
-    //                if (bot->ToCreature()->IsNPCBot())
-    //                    bot->ToCreature()->OnBotDespawn(this);
-    //    return;
-    //}
-    //end npcbots
-
     AddObjectToRemoveList();
 }
 
@@ -316,7 +303,7 @@ void TempSummon::RemoveFromWorld()
                     owner->m_SummonSlot[slot].Clear();
 
     //if (GetOwnerGUID())
-    //    TC_LOG_ERROR("entities.unit", "Unit %u has owner guid when removed from world", GetEntry());
+    //    TC_LOG_ERROR("entities.unit", "Unit {} has owner guid when removed from world", GetEntry());
 
     Creature::RemoveFromWorld();
 }

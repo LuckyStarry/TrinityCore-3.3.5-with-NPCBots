@@ -2,6 +2,7 @@
 #include "botmgr.h"
 #include "bottext.h"
 #include "bottraits.h"
+#include "Containers.h"
 #include "Group.h"
 #include "Log.h"
 #include "Map.h"
@@ -321,12 +322,12 @@ public:
 
                 if (me->GetPowerType() != POWER_MANA)
                 {
-                    //TC_LOG_ERROR("entities.player", "druid_bot::removeShapeshiftForm(): still has poweType %u!", uint32(me->GetPowerType()));
+                    //TC_LOG_ERROR("entities.player", "druid_bot::removeShapeshiftForm(): still has poweType {}!", uint32(me->GetPowerType()));
                     me->SetPowerType(POWER_MANA);
                 }
                 if (me->GetShapeshiftForm() != FORM_NONE)
                 {
-                    //TC_LOG_ERROR("entities.player", "druid_bot::removeShapeshiftForm(): still speshifted into %u!", uint32(me->GetShapeshiftForm()));
+                    //TC_LOG_ERROR("entities.player", "druid_bot::removeShapeshiftForm(): still speshifted into {}!", uint32(me->GetShapeshiftForm()));
                     me->RemoveAurasByType(SPELL_AURA_MOD_SHAPESHIFT, me->GetGUID(), nullptr, false);
                 }
 
@@ -355,96 +356,56 @@ public:
             if (!gPlayer || GC_Timer > diff || IAmFree()) return false;
             if (IsCasting()) return false; // if I'm already casting
             if (Rand() > 30 + 50 * (me->GetMap()->IsRaid())) return false;
+            if (!gPlayer->GetGroup()) return false;
 
-            Group const* pGroup = gPlayer->GetGroup();
-            if (!pGroup) return false;
             bool tranq = IsSpellReady(TRANQUILITY_1, diff, false);
             bool growt = IsSpellReady(WILD_GROWTH_1, diff, false) && !HasRole(BOT_ROLE_DPS);
-            if (!tranq && !growt) return false;
+            if (!tranq && !growt)
+                return false;
 
             uint8 LHPcount = 0;
             uint8 pct = 100;
             Unit* healTarget = nullptr;
-            std::list<Unit*> groupUnits;
-            for (GroupReference const* itr = pGroup->GetFirstMember(); itr != nullptr; itr = itr->next())
+            std::vector<Unit*> members = BotMgr::GetAllGroupMembers(master);
+            std::vector<Unit*> groupUnits;
+            groupUnits.reserve(members.size());
+
+            for (Unit* member : members)
             {
-                Player* tPlayer = itr->GetSource();
-                if (!tPlayer || me->GetMap() != tPlayer->FindMap() || tPlayer->isPossessed() || tPlayer->IsCharmed())
+                if (me->GetMap() != member->FindMap() || member->isPossessed() || member->IsCharmed() ||
+                    !member->IsAlive() || me->GetDistance(member) > 40)
                     continue;
-                if (tPlayer->IsAlive() && me->GetDistance(tPlayer) < 40)
+                if (growt)
+                    groupUnits.push_back(member);
+                if (tranq && GetHealthPCT(member) < 80)
                 {
-                    if (growt)
-                        groupUnits.push_back(tPlayer);
-                    if (tranq && GetHealthPCT(tPlayer) < 80)
+                    if (GetHealthPCT(member) < pct)
                     {
-                        if (GetHealthPCT(tPlayer) < pct)
-                        {
-                            pct = GetHealthPCT(tPlayer);
-                            healTarget = tPlayer;
-                        }
-                        ++LHPcount;
-                        if (LHPcount > 2) break;
+                        pct = GetHealthPCT(member);
+                        healTarget = member;
                     }
-                }
-                if (tPlayer->HaveBot())
-                {
-                    BotMap const* map = tPlayer->GetBotMgr()->GetBotMap();
-                    for (BotMap::const_iterator it = map->begin(); it != map->end(); ++it)
-                    {
-                        Creature* bot = it->second;
-                        if (bot && bot->IsInWorld() && bot->IsAlive() && bot->GetDistance(me) < 40)
-                        {
-                            if (growt)
-                                groupUnits.push_back(bot);
-                            if (tranq && GetHealthPCT(bot) < 80)
-                            {
-                                if (GetHealthPCT(bot) < pct)
-                                {
-                                    pct = GetHealthPCT(bot);
-                                    healTarget = bot;
-                                }
-                                ++LHPcount;
-                                if (LHPcount > 2) break;
-                            }
-                        }
-                    }
+                    ++LHPcount;
+                    if (LHPcount > 2)
+                        break;
                 }
             }
+
             if (LHPcount > 2 && tranq &&
                 doCast(me, GetSpell(TRANQUILITY_1)))
                 return true;
 
             healTarget = nullptr;
-            for (std::list<Unit*>::const_iterator i = groupUnits.begin(); i != groupUnits.end(); ++i)
+            for (Unit* gUnit : groupUnits)
             {
                 LHPcount = 0;
-                Unit* gUnit = *i;
-
-                for (GroupReference const* itr = pGroup->GetFirstMember(); itr != nullptr; itr = itr->next())
+                for (Unit* member : members)
                 {
-                    Player* tPlayer = itr->GetSource();
-                    if (!tPlayer || me->GetMap() != tPlayer->FindMap())
+                    if (me->GetMap() != member->FindMap() || member->isPossessed() || member->IsCharmed() ||
+                        !member->IsAlive() || me->GetDistance(member) > 40)
                         continue;
-                    if (tPlayer->IsAlive() && !tPlayer->isPossessed() && !tPlayer->IsCharmed() &&
-                        gUnit->GetDistance(tPlayer) < 15 && (GetLostHP(tPlayer) > 2000 || GetHealthPCT(tPlayer) < 90))
-                        ++LHPcount;
-
-                    if (tPlayer->HaveBot())
-                    {
-                        BotMap const* map = tPlayer->GetBotMgr()->GetBotMap();
-                        for (BotMap::const_iterator it = map->begin(); it != map->end(); ++it)
-                        {
-                            Creature* bot = it->second;
-                            if (bot && bot->IsInWorld() && bot->IsAlive())
-                            {
-                                if (gUnit->GetDistance(bot) < 15 && (GetLostHP(bot) > 2000 || GetHealthPCT(bot) < 90))
-                                    ++LHPcount;
-                            }
-                        }
-                    }
-
-                    if (LHPcount >= 3)
-                        break;
+                    if (gUnit->GetDistance(member) < 15 && (GetLostHP(member) > 2000 || GetHealthPCT(member) < 90))
+                        if (++LHPcount >= 3)
+                            break;
                 }
 
                 if (LHPcount >= 3)
@@ -781,15 +742,18 @@ public:
             Unit* u = mytar->GetVictim();
             if (IsSpellReady(GROWL_1, diff, false) && u && u != me && Rand() < 40 && dist < 30 &&
                 mytar->GetTypeId() == TYPEID_UNIT && !mytar->IsControlledByPlayer() &&
-                !CCed(mytar) && !mytar->HasAuraType(SPELL_AURA_MOD_TAUNT) && IsInBotParty(u) &&
-                (!IsTank(u) || (IsTank() && GetHealthPCT(u) < 30 && GetHealthPCT(me) > 67)) &&
-                ((!IsTankingClass(u->GetClass()) && GetHealthPCT(u) < 80) || IsTank()))
+                !CCed(mytar) && !mytar->HasAuraType(SPELL_AURA_MOD_TAUNT) &&
+                (!IsTank(u) || (IsTank() && GetHealthPCT(me) > 67 &&
+                (GetHealthPCT(u) < 30 || (IsOffTank() && !IsOffTank(u) && IsPointedOffTankingTarget(mytar)) ||
+                (!IsOffTank() && IsOffTank(u) && IsPointedTankingTarget(mytar))))) &&
+                ((!IsTankingClass(u->GetClass()) && GetHealthPCT(u) < 80) || IsTank()) &&
+                IsInBotParty(u))
             {
                 if (doCast(mytar, GetSpell(GROWL_1)))
                     return;
             }
             //GROWL 2 (distant)
-            if (IsSpellReady(GROWL_1, diff, false) && !IAmFree() && u == me &&  Rand() < 20 &&IsTank() &&
+            if (IsSpellReady(GROWL_1, diff, false) && !IAmFree() && u == me &&  Rand() < 20 && IsTank() &&
                 (IsOffTank() || master->GetBotMgr()->GetNpcBotsCountByRole(BOT_ROLE_TANK_OFF) == 0) &&
                 !(me->GetLevel() >= 40 && mytar->GetTypeId() == TYPEID_UNIT &&
                 (mytar->ToCreature()->IsDungeonBoss() || mytar->ToCreature()->isWorldBoss())))
@@ -1260,6 +1224,8 @@ public:
             if (!target || !target->IsAlive() || target->GetShapeshiftForm() == FORM_SPIRITOFREDEMPTION || me->GetDistance(target) > 40)
                 return false;
             uint8 hp = GetHealthPCT(target);
+            if (hp > GetHealHpPctThreshold())
+                return false;
             bool pointed = IsPointedHealTarget(target);
             if (hp > 95 && !(pointed && me->GetMap()->IsRaid()) &&
                 (!target->IsInCombat() || target->getAttackers().empty() || !IsTank(target) || !me->GetMap()->IsRaid()))
@@ -1466,7 +1432,7 @@ public:
                 (IsTank() || me->getAttackers().size() > 3))
                 return;
 
-            static uint8 minmanaval = 30;
+            static const uint8 minmanaval = 30;
             Unit* iTarget = nullptr;
 
             if (master->IsInCombat() && master->GetPowerType() == POWER_MANA &&
@@ -1500,45 +1466,27 @@ public:
                 }
                 if (!iTarget && group) //cycle through player members...
                 {
-                    for (GroupReference const* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+                    std::vector<Unit*> members = BotMgr::GetAllGroupMembers(group);
+                    for (uint8 i = 0; i < 2 && !iTarget; ++i)
                     {
-                        Player* tPlayer = itr->GetSource();
-                        if (tPlayer == nullptr || !tPlayer->IsInWorld() || !tPlayer->IsInCombat() || !tPlayer->IsAlive()) continue;
-                        if (tPlayer->GetPowerType() != POWER_MANA) continue;
-                        if (me->GetExactDist(tPlayer) > 30) continue;
-                        if (GetManaPCT(tPlayer) < minmanaval && !tPlayer->GetAuraEffect(SPELL_AURA_PERIODIC_ENERGIZE, SPELLFAMILY_DRUID, 0x0, 0x1000, 0x0))
+                        for (Unit* member : members)
                         {
-                            iTarget = tPlayer;
-                            break;
-                        }
-                        if (iTarget)
-                            break;
-                    }
-                }
-                if (!iTarget && group) //... and their bots.
-                {
-                    for (GroupReference const* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
-                    {
-                        Player const* tPlayer = itr->GetSource();
-                        if (tPlayer == nullptr || !tPlayer->HaveBot()) continue;
-                        BotMap const* map = tPlayer->GetBotMgr()->GetBotMap();
-                        for (BotMap::const_iterator it = map->begin(); it != map->end(); ++it)
-                        {
-                            Creature* bot = it->second;
-                            if (!bot || !bot->IsInCombat() || !bot->IsAlive() || bot->IsTempBot()) continue;
-                            if (bot->GetPowerType() != POWER_MANA) continue;
-                            if (bot->GetBotClass() == BOT_CLASS_HUNTER || bot->GetBotClass() == BOT_CLASS_WARLOCK ||
-                                bot->GetBotClass() == BOT_CLASS_SPHYNX || bot->GetBotClass() == BOT_CLASS_SPELLBREAKER ||
-                                bot->GetBotClass() == BOT_CLASS_NECROMANCER) continue;
-                            if (me->GetExactDist(bot) > 30) continue;
-                            if (GetManaPCT(bot) < minmanaval && !bot->GetAuraEffect(SPELL_AURA_PERIODIC_ENERGIZE, SPELLFAMILY_DRUID, 0x0, 0x1000, 0x0))
+                            if (!(i == 0 ? member->IsPlayer() : member->IsNPCBot()) || !member->IsInWorld() || !member->IsInCombat() ||
+                                !member->IsAlive() || me->GetExactDist(member) > 30 || GetManaPCT(member) > minmanaval ||
+                                member->GetAuraEffect(SPELL_AURA_PERIODIC_ENERGIZE, SPELLFAMILY_DRUID, 0x0, 0x1000, 0x0))
+                                continue;
+                            if (i == 1)
                             {
-                                iTarget = bot;
-                                break;
+                                Creature const* bot = member->ToCreature();
+                                if (bot->IsTempBot() || bot->GetPowerType() != POWER_MANA ||
+                                    bot->GetBotClass() == BOT_CLASS_HUNTER || bot->GetBotClass() == BOT_CLASS_WARLOCK ||
+                                    bot->GetBotClass() == BOT_CLASS_SPHYNX || bot->GetBotClass() == BOT_CLASS_SPELLBREAKER ||
+                                    bot->GetBotClass() == BOT_CLASS_NECROMANCER)
+                                    continue;
                             }
-                        }
-                        if (iTarget)
+                            iTarget = member;
                             break;
+                        }
                     }
                 }
             }
@@ -1733,7 +1681,7 @@ public:
                     }
                     break;
                 default:
-                    TC_LOG_ERROR("entities.player", "druid_bot::setStats(): NYI form %u", uint32(form));
+                    TC_LOG_ERROR("entities.player", "druid_bot::setStats(): NYI form {}", uint32(form));
                     setStats(BOT_STANCE_NONE);
                     return;
             }
@@ -2249,18 +2197,18 @@ public:
                 {
                     comboPoints++;
                     //debug
-                    //TC_LOG_ERROR("entities.player", "druid_bot CP GEN: %s adds 1, now %u", spell->SpellName[0], uint32(comboPoints));
+                    //TC_LOG_ERROR("entities.player", "druid_bot CP GEN: {} adds 1, now {}", spell->SpellName[0], uint32(comboPoints));
                     if (primalFuryProc)
                     {
                         comboPoints++;
                         //debug
-                        //TC_LOG_ERROR("entities.player", "druid_bot CP EX: now %u", uint32(comboPoints));
+                        //TC_LOG_ERROR("entities.player", "druid_bot CP EX: now {}", uint32(comboPoints));
                     }
                     if (comboPoints > 5)
                     {
                         comboPoints = 5;
                         //debug
-                        //TC_LOG_ERROR("entities.player", "druid_bot CP NOR: now %u", uint32(comboPoints));
+                        //TC_LOG_ERROR("entities.player", "druid_bot CP NOR: now {}", uint32(comboPoints));
                     }
                 }
                 //Combo point spending
@@ -2268,7 +2216,7 @@ public:
                 else if (spell->NeedsComboPoints())
                 {
                     //debug
-                    //TC_LOG_ERROR("entities.player", "druid_bot CP SPEND1: %u to 0", uint32(comboPoints));
+                    //TC_LOG_ERROR("entities.player", "druid_bot CP SPEND1: {} to 0", uint32(comboPoints));
                     if (lvl >= 25 && comboPoints > 0)
                     {
                         if (urand(1,100) <= uint32(comboPoints * 20))
@@ -2575,7 +2523,6 @@ public:
                 myPet->SetFaction(master->GetFaction());
                 myPet->SetControlledByPlayer(!IAmFree());
                 myPet->SetPvP(me->IsPvP());
-                myPet->SetUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED);
                 myPet->SetByteValue(UNIT_FIELD_BYTES_2, 1, master->GetByteValue(UNIT_FIELD_BYTES_2, 1));
                 myPet->SetUInt32Value(UNIT_CREATED_BY_SPELL, FORCE_OF_NATURE_1);
                 //botPet = myPet;
@@ -2610,7 +2557,7 @@ public:
 
         void SummonedCreatureDespawn(Creature* summon) override
         {
-            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: %s's %s", me->GetName().c_str(), summon->GetName().c_str());
+            //TC_LOG_ERROR("entities.unit", "SummonedCreatureDespawn: {}'s {}", me->GetName(), summon->GetName());
             //if (summon == botPet)
             //    botPet = nullptr;
             if (summon->GetEntry() == BOT_PET_FORCE_OF_NATURE)
